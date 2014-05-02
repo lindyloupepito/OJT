@@ -32,7 +32,7 @@ class Customer():
 		self.is_last = False
 		self.service_time = random.randrange(3, 15)
 		rand = random.randrange(0, 100)
-		if rand <= 20:
+		if rand <= 50:
 			self.leave = True
 			self.waiting_time = random.randrange(5, 15)
 		else:
@@ -56,9 +56,8 @@ class Barber():
 		logging.info("The barber wakes up O.O")
 
 class Barbershop():
-	def __init__(self, num_of_seats, max_num_of_customer):
+	def __init__(self, num_of_seats):
 		self.seats = threading.Semaphore(num_of_seats)
-		self.max_num_of_customer = max_num_of_customer
 		self.barber = Barber()
 		self.waiting_customers = Queue()
 		self.num_of_seats = num_of_seats
@@ -68,9 +67,9 @@ class Barbershop():
 		self.working_thread.start()
 
 	def start_work(self):
-		self.barber.sleep()
+		logging.info("The barber shop opens.")
 		stop = False
-		while self.customers_arrived < self.max_num_of_customer:
+		while True:
 			if self.waiting_customers.is_empty():
 				if not self.barber.is_sleeping:
 					self.barber.sleep()
@@ -86,51 +85,39 @@ class Barbershop():
 						break
 			if stop:
 				break
+		logging.info("The barber shop closes.")
 
 	def enter_shop(self, customer):
-		if self.customers_arrived < self.max_num_of_customer:
-			logging.info("%s arrives at the barber shop." % customer.name)
-			self.customers_arrived += 1
-			if self.customers_arrived == self.max_num_of_customer:
-				customer.is_last = True
-			if self.counter == self.num_of_seats:
-				logging.info("Waiting lounge is full. %s waits for a vacant seat." % customer.name)
-			self.seats.acquire()
-			self.counter += 1
-			logging.info("%s acquires a seat." % customer.name)
-			self.waiting_customers.enqueue(customer)
-			if customer.leave:
-				time.sleep(customer.waiting_time)
-				try:
-					self.waiting_customers.lst.remove(customer)
-					logging.info("%s is on a hurry and leaves the shop." % customer.name)
-					self.seats.release()
-					self.counter -= 1
-				except:
-					pass
-		else:
-			logging.info("%s arrives at the barber shop but the barber cannot accomodate more customer." % customer.name)
+		logging.info("%s arrives at the barber shop." % customer.name)
+		self.customers_arrived += 1
+		if self.counter == self.num_of_seats:
+			logging.info("Waiting lounge is full. %s waits for a vacant seat." % customer.name)
+		self.seats.acquire()
+		self.counter += 1
+		logging.info("%s acquires a seat." % customer.name)
+		self.waiting_customers.enqueue(customer)
+		if customer.leave:
+			time.sleep(customer.waiting_time)
+			try:
+				self.waiting_customers.lst.remove(customer)
+				logging.info("%s cannot wait and leaves the shop." % customer.name)
+				self.seats.release()
+				self.counter -= 1
+			except:
+				pass
 
 def main():
 	customers = []
-	customers.append(Customer("Zarah"))
-	customers.append(Customer("Elise"))
-	customers.append(Customer("Aldwyn"))
-	customers.append(Customer("Yen"))
-	customers.append(Customer("Aldrin"))
-	customers.append(Customer("Jonald"))
-	customers.append(Customer("Shai"))
-	customers.append(Customer("Lucelle"))
-	customers.append(Customer("Marc"))
-	customers.append(Customer("Su"))
-	customers.append(Customer("Nacua"))
-	customers.append(Customer("Atan"))
+	for i in range(15):
+		customers.append(Customer("Customer " + str(i+1)))
+	customers[len(customers)-1].is_last = True
+	customers[len(customers)-1].leave = False
 
 	print "Process running..."
 	logging.basicConfig(filename="barber.log", level=logging.INFO, format="%(message)s")
-	bs = Barbershop(3, 9) #number of seats, maximum number of customers to be served
+	bs = Barbershop(3)
 	for customer in customers:
 		bs.enter_shop(customer)
-		time.sleep(random.randrange(3, 5)) #time interval for the next customer to enter the barber shop
+		time.sleep(random.randrange(3, 5)) 		#time interval for the next customer to enter the barber shop
 
 main()
