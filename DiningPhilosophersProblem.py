@@ -46,7 +46,6 @@ class Philosopher(threading.Thread):
 
 	def __think(self):
 		logging.info("Philosopher " + str(self.ID) + " is thinking")
-		# time.sleep(1)
 
 	def __release_forks(self):
 		self.left_fork.release()
