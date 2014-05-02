@@ -23,18 +23,15 @@ class Queue():
 	def is_empty(self):
 		return True if len(self.lst) <= 0 else False
 
-	def remove(self, element):
-		self.lst.remove(element)
-
 class Customer():
 	def __init__(self, name):
 		self.name = name
 		self.is_last = False
-		self.service_time = random.randrange(3, 15)
+		self.service_time = random.randrange(min_service_time, max_service_time)
 		rand = random.randrange(0, 100)
 		if rand <= 50:
 			self.leave = True
-			self.waiting_time = random.randrange(5, 15)
+			self.waiting_time = random.randrange(min_waiting_time, max_waiting_time)
 		else:
 			self.leave = False
 
@@ -60,9 +57,10 @@ class Barbershop():
 		self.seats = threading.Semaphore(num_of_seats)
 		self.barber = Barber()
 		self.waiting_customers = Queue()
+		#the next two variables are just for printing purposes only
 		self.num_of_seats = num_of_seats
-		self.customers_arrived = 0
 		self.counter = 0
+
 		self.working_thread = threading.Thread(target=self.start_work)
 		self.working_thread.start()
 
@@ -89,7 +87,6 @@ class Barbershop():
 
 	def enter_shop(self, customer):
 		logging.info("%s arrives at the barber shop." % customer.name)
-		self.customers_arrived += 1
 		if self.counter == self.num_of_seats:
 			logging.info("Waiting lounge is full. %s waits for a vacant seat." % customer.name)
 		self.seats.acquire()
@@ -106,18 +103,24 @@ class Barbershop():
 			except:
 				pass
 
-def main():
-	customers = []
-	for i in range(15):
-		customers.append(Customer("Customer " + str(i+1)))
-	customers[len(customers)-1].is_last = True
-	customers[len(customers)-1].leave = False
+number_of_customers = 15
+number_of_seats = 3
+customer_min_interval = 3
+customer_max_interval = 5
+min_service_time = 3
+max_service_time = 15
+min_waiting_time = 5
+max_waiting_time = 15
 
-	print "Process running..."
-	logging.basicConfig(filename="barber.log", level=logging.INFO, format="%(message)s")
-	bs = Barbershop(3)
-	for customer in customers:
-		bs.enter_shop(customer)
-		time.sleep(random.randrange(3, 5)) 		#time interval for the next customer to enter the barber shop
+customers = []
+for i in range(number_of_customers):
+	customers.append(Customer("Customer " + str(i+1)))
+customers[len(customers)-1].is_last = True
+customers[len(customers)-1].leave = False	#forces the last customer not to leave so that the loop in start_work will be stopped
 
-main()
+print "Process running..."
+logging.basicConfig(filename="barber.log", level=logging.INFO, format="%(message)s")
+bs = Barbershop(number_of_seats)
+for customer in customers:
+	bs.enter_shop(customer)
+	time.sleep(random.randrange(customer_min_interval, customer_max_interval)) 		#time interval for the next customer to enter the barber shop
