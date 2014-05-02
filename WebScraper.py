@@ -3,7 +3,6 @@ from collections import OrderedDict
 import requests
 import json
 import threading
-import cProfile
 import logging
 
 class Queue():
@@ -35,6 +34,8 @@ class WebScraper():
 		}
 
 	def search(self, keywords, url, search_type = "jobs", search_category = ""):
+		logging.basicConfig(filename="results.json", level=logging.WARNING, format='%(message)s')
+		requests_log = logging.getLogger("requests")
 		keyword_queue = Queue()
 		workers = []
 
@@ -44,12 +45,13 @@ class WebScraper():
 			worker = Worker()
 			worker.url = url
 			worker.ID = i
+			worker.search_category = search_category
+			worker.search_type = search_type
 			worker.keyword_queue = keyword_queue
 			worker.proxies = self.proxies
 			workers.append(worker)
 		
 		print "Program running..."
-		logging.basicConfig(filename="results.json", level=logging.INFO, format='%(message)s')
 		for worker in workers:
 			worker.start()
 
@@ -65,8 +67,8 @@ class Worker(threading.Thread):
 		self.keyword = None
 		self.proxies = None
 		self.url = None
-		self.search_type = "jobs"
-		self.search_category = ""
+		self.search_type = None
+		self.search_category = None
 		self.not_finished = True
 		self.keyword_queue = None
 
@@ -117,12 +119,11 @@ class Worker(threading.Thread):
 			else:
 				not_last_page = False
 				self.not_finished = False
-		print job_entries, "entries found for the keyword", self.keyword.ID
+		print "%d entries found for the keyword '%s'" % (job_entries, self.keyword.ID)
 
 	def __write_data(self, dictionary):
 		toWrite = json.dumps(dictionary, indent=4)
-		logging.info(toWrite + "\n")
-		# print toWrite + "\n"
+		logging.warning(toWrite)
 
 	def __send_request(self, page):
 		self.url += str(self.search_type) + "/search/"
