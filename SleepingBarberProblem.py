@@ -29,12 +29,12 @@ class Queue():
 class Customer():
 	def __init__(self, name):
 		self.name = name
+		self.is_last = False
 		self.service_time = random.randrange(3, 15)
 		rand = random.randrange(0, 100)
-		self.parent_list = None
 		if rand <= 20:
 			self.leave = True
-			self.waiting_time = random.randrange(3, 15)
+			self.waiting_time = random.randrange(5, 15)
 		else:
 			self.leave = False
 
@@ -45,7 +45,7 @@ class Barber():
 	def service_customer(self, customer):
 		logging.info("%s is having a haircut for %d seconds." % (customer.name, customer.service_time))
 		time.sleep(customer.service_time)
-		logging.info("%s is done and leaves the shop." % customer.name)\
+		logging.info("%s is done and leaves the shop." % customer.name)
 
 	def sleep(self):
 		self.is_sleeping = True
@@ -69,6 +69,7 @@ class Barbershop():
 
 	def start_work(self):
 		self.barber.sleep()
+		stop = False
 		while self.customers_arrived < self.max_num_of_customer:
 			if self.waiting_customers.is_empty():
 				if not self.barber.is_sleeping:
@@ -80,10 +81,18 @@ class Barbershop():
 					self.seats.release()
 					self.counter -= 1
 					self.barber.service_customer(customer)
+					if customer.is_last:
+						stop = True
+						break
+			if stop:
+				break
 
 	def enter_shop(self, customer):
 		if self.customers_arrived < self.max_num_of_customer:
 			logging.info("%s arrives at the barber shop." % customer.name)
+			self.customers_arrived += 1
+			if self.customers_arrived == self.max_num_of_customer:
+				customer.is_last = True
 			if self.counter == self.num_of_seats:
 				logging.info("Waiting lounge is full. %s waits for a vacant seat." % customer.name)
 			self.seats.acquire()
@@ -99,31 +108,29 @@ class Barbershop():
 					self.counter -= 1
 				except:
 					pass
-			self.customers_arrived += 1
 		else:
-			logging.info("%s has arrived but the maximum capacity has already reached." % customer.name)
+			logging.info("%s arrives at the barber shop but the barber cannot accomodate more customer." % customer.name)
 
 def main():
-	customers = Queue()
-	customers.enqueue(Customer("Zarah"))
-	customers.enqueue(Customer("Elise"))
-	customers.enqueue(Customer("Aldwyn"))
-	customers.enqueue(Customer("Yen"))
-	customers.enqueue(Customer("Aldrin"))
-	customers.enqueue(Customer("Jonald"))
-	customers.enqueue(Customer("Shai"))
-	customers.enqueue(Customer("Lucelle"))
-	customers.enqueue(Customer("Marc"))
-	customers.enqueue(Customer("Su"))
-	customers.enqueue(Customer("Nacua"))
-	customers.enqueue(Customer("Atan"))
+	customers = []
+	customers.append(Customer("Zarah"))
+	customers.append(Customer("Elise"))
+	customers.append(Customer("Aldwyn"))
+	customers.append(Customer("Yen"))
+	customers.append(Customer("Aldrin"))
+	customers.append(Customer("Jonald"))
+	customers.append(Customer("Shai"))
+	customers.append(Customer("Lucelle"))
+	customers.append(Customer("Marc"))
+	customers.append(Customer("Su"))
+	customers.append(Customer("Nacua"))
+	customers.append(Customer("Atan"))
 
 	print "Process running..."
 	logging.basicConfig(filename="barber.log", level=logging.INFO, format="%(message)s")
-	bs = Barbershop(3, 11)
-	while not customers.is_empty():
-		customer = customers.dequeue()
+	bs = Barbershop(3, 9) #number of seats, maximum number of customers to be served
+	for customer in customers:
 		bs.enter_shop(customer)
-		time.sleep(random.randrange(3, 5))
+		time.sleep(random.randrange(3, 5)) #time interval for the next customer to enter the barber shop
 
 main()
