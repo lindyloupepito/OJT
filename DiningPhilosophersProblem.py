@@ -1,151 +1,81 @@
 import threading
 import time
-import random
 import logging
+import sys
 
-class Queue:
+class Philosopher(threading.Thread):
 	def __init__(self):
-		self.lst = []
-
-	def enqueue(self, element):
-		self.lst.append(element)
-
-	def dequeue(self):
-		to_return = None
-		if len(self.lst) > 0:
-			first = self.lst[0]
-			self.lst.remove(self.lst[0])
-			to_return = first
-		else:
-			to_return = "Queue is empty."
-		return to_return
-
-	def is_empty(self):
-		return True if len(self.lst) <= 0 else False
-
-	def remove(self, element):
-		self.lst.remove(element)
-
-class Customer(threading.Thread):
-	def __init__(self, name, barbershop):
 		threading.Thread.__init__(self)
-		self.name = name
-		self.is_last = False
-		self.shop = barbershop
-		self.served = False
-		self.tracker = False
-		self.service_time = random.randrange(self.shop.min_service_time, self.shop.max_service_time)
-		rand = random.randrange(0, 100)
-		if rand < 50:
-			self.leave = True
-			self.waiting_time = random.randrange(self.shop.min_waiting_time, self.shop.max_waiting_time)
-		else:
-			self.leave = False
+		self.ID = None
+		self.right_fork = None
+		self.left_fork = None
+		self.delay = 0
+		self.parent_list = []
+		self.fork_list = []
+		self.alive = True
 
 	def run(self):
-		self.__enter_shop()
-		while not self.served:
-			self.__wait()
+		while self.alive:
+			self.__think()
+			self.__eat()
 
-	def __enter_shop(self):
-		time.sleep(random.randrange(self.shop.customer_min_interval, self.shop.customer_max_interval))
-		logging.info("%s arrives at the barber shop." % self.name)
-		self.shop.customers_arrived += 1
-		if self.shop.customers_arrived == self.shop.num_of_customers:
-			self.is_last = True
-			self.leave = False #forces the last customer not to leave so that the loop 'start work' will end
-		if self.shop.counter == self.shop.num_of_seats:
-			logging.info("Waiting lounge is full. %s waits for a vacant seat." % self.name)
-		self.shop.seats.acquire()
-		self.shop.counter += 1
-		logging.info("%s acquires a seat." % self.name)
-		self.shop.waiting_customers.enqueue(self)
-
-	def __wait(self):
-		if self.leave:
-			time.sleep(self.waiting_time)
-			try:
-				self.shop.waiting_customers.remove(self)
-				logging.info("%s cannot wait and leaves the shop." % self.name)
-				self.seats.release()
-				self.shop.counter -= 1
-			except:
-				pass
-		else:
-			if not self.tracker:
-				logging.info("%s is waiting for his turn." % self.name)
-				self.tracker = True
-
-class Barber(threading.Thread):
-	def __init__(self, barbershop):
-		threading.Thread.__init__(self)
-		self.is_sleeping = False
-		self.shop = barbershop
-
-	def run(self):
-		logging.info("The barber shop opens.")
-		stop = False
-		while True:
-			if self.shop.waiting_customers.is_empty():
-				if not self.is_sleeping:
-					self.__sleep()
+	def __acquire_forks(self):
+		successfully_acquired = False
+		if not self.left_fork.locked():
+			self.left_fork.acquire()
+			logging.info("Philosopher %d acquires left fork(%d)" % (self.ID, self.fork_list.index(self.left_fork)+1))
+			if not self.right_fork.locked():
+				self.right_fork.acquire()
+				logging.info("Philosopher %d acquires right fork(%d)" % (self.ID, self.fork_list.index(self.right_fork)+1))
+				successfully_acquired = True
 			else:
-				self.__wake_up()
-				while not self.shop.waiting_customers.is_empty():
-					customer = self.shop.waiting_customers.dequeue()
-					self.shop.seats.release()
-					self.shop.counter -= 1
-					self.__service_customer(customer)
-					customer.served = True
-					logging.info(customer.served, customer.served)
-					if customer.is_last:
-						stop = True
-						break
-			if stop:
-				break
-		logging.info("The barber shop closes.")
+				self.left_fork.release()
+				logging.info("Philosopher %d releases left fork(%d)" % (self.ID, self.fork_list.index(self.left_fork)+1))
+		return successfully_acquired
 
-	def __service_customer(self, customer):
-		logging.info("%s is having a haircut for %d seconds." % (customer.name, customer.service_time))
-		time.sleep(customer.service_time)
-		logging.info("%s is done and leaves the shop." % customer.name)
+	def __eat(self):
+		if self.__acquire_forks():
+			print("Philosopher %d is eating" % self.ID)
+			logging.info("Philosopher %d starts eating" % self.ID)
+			time.sleep(self.delay)
+			print("Philosopher %d has finished eating" % self.ID)
+			logging.info("Philosopher %d has finished eating" % self.ID)
+			self.__release_forks()
+			self.__remove_self()
+			self.alive = False
 
-	def __sleep(self):
-		self.is_sleeping = True
-		logging.info("The barber is sleeping -.-")
+	def __think(self):
+		logging.info("Philosopher " + str(self.ID) + " is thinking")
 
-	def __wake_up(self):
-		self.is_sleeping = False
-		logging.info("The barber wakes up O.O")
+	def __release_forks(self):
+		self.left_fork.release()
+		logging.info("Philosopher %d releases left fork(%d)" % (self.ID, self.fork_list.index(self.left_fork)+1))
+		self.right_fork.release()
+		logging.info("Philosopher %d releases right fork(%d)" % (self.ID, self.fork_list.index(self.right_fork)+1))
 
-class Barbershop:
-	def __init__(self):
-		logging.basicConfig(filename="barber.log", level=logging.INFO, format="%(message)s")
+	def __remove_self(self):
+		self.parent_list.remove(self)
 
-		self.num_of_seats = 3
-		self.customer_min_interval = 5
-		self.customer_max_interval = 15
-		self.min_service_time = 3
-		self.max_service_time = 15
-		self.min_waiting_time = 5
-		self.max_waiting_time = 10
-		self.num_of_customers = 5
+class DiningPhilosopher():
+	def __init__(self, num_of_philosophers, delay):
+		self.forks = [threading.Lock() for x in range(num_of_philosophers)]
+		self.philosophers = []
+		for i in range(num_of_philosophers):
+			philosopher = Philosopher()
+			philosopher.ID = i+1
+			philosopher.left_fork = self.forks[i%num_of_philosophers]
+			philosopher.right_fork = self.forks[(i+1)%num_of_philosophers]
+			philosopher.delay = delay
+			philosopher.fork_list = self.forks
+			self.philosophers.append(philosopher)
 
-		self.customers_arrived = 0
-		self.counter = 0
-		self.seats = threading.Semaphore(self.num_of_seats)
-		self.waiting_customers = Queue()
+		for philosopher in self.philosophers:
+			philosopher.parent_list = self.philosophers
 
-		customers = []
-		for i in range(self.num_of_customers):
-			name = "Customer " + str(i+1)
-			customers.append(Customer(name, self))
+	def start_eating(self):
+		logging.basicConfig(filename="data.log", level=logging.INFO, format='%(message)s')
+		for i in range(len(self.philosophers)):
+			self.philosophers[i].start()
 
-		print "Processing..."
-		barber = Barber(self)
-		barber.start()
-
-		for customer in customers:
-			customer.start()
-
-bs = Barbershop()
+dp = DiningPhilosopher(6, 1)
+dp.start_eating()
