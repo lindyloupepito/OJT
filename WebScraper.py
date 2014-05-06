@@ -2,27 +2,11 @@ from bs4 import BeautifulSoup
 from collections import OrderedDict
 import requests
 import json
-import threading
+import multiprocessing
 import logging
+import threading
 
-class Queue():
-	def __init__(self):
-		self.lst = []
-
-	def enqueue(self, element):
-		self.lst.append(element)
-
-	def dequeue(self):
-		to_return = None
-		if len(self.lst) > 0:
-			first = self.lst[0]
-			self.lst.remove(self.lst[0])
-			to_return = first
-		else:
-			to_return = "Queue is empty"
-		return to_return
-
-class WebScraper():
+class WebScraper:
 	def __init__(self):
 		self.proxies = {
 			"http": "http://23.27.197.200:24801",
@@ -34,54 +18,55 @@ class WebScraper():
 		}
 
 	def search(self, keywords, url, search_type = "jobs", search_category = ""):
-		logging.basicConfig(filename="results.json", level=logging.WARNING, format='%(message)s')
 		requests_log = logging.getLogger("requests")
-		keyword_queue = Queue()
-		workers = []
+		keyword = multiprocessing.Queue()
+		for key in keywords:
+			keyword.put(key)
+		keyword.put(None) #poison pill to end each worker
 
-		for i in range(len(keywords)):
-			keyword = Keyword(keywords[i])
-			keyword_queue.enqueue(keyword)
-			worker = Worker()
-			worker.url = url
-			worker.ID = i
-			worker.search_category = search_category
-			worker.search_type = search_type
-			worker.keyword_queue = keyword_queue
-			worker.proxies = self.proxies
+		results = multiprocessing.Queue()
+		lock = multiprocessing.Lock()
+		workers = []
+		for i in range(multiprocessing.cpu_count()):
+			worker = Worker(url, i, search_category, search_type, keyword, self.proxies, results, lock)
 			workers.append(worker)
-		
-		print "Program running..."
+
+		logger = Logger(results)
+		logger.start()
+
 		for worker in workers:
 			worker.start()
 
-class Keyword():
-	def __init__(self, ID):
-		self.ID = ID
-		self.lock = threading.Lock()
+		for worker in workers:
+			worker.join()
 
-class Worker(threading.Thread):
-	def __init__(self):
-		threading.Thread.__init__(self)
-		self.ID = None
+		results.put(None) #poison pill to end the writer
+
+class Worker(multiprocessing.Process):
+	def __init__(self, url, id, search_category, search_type, keywords, proxies, results, lock):
+		multiprocessing.Process.__init__(self)
+		self.ID = id
 		self.keyword = None
-		self.proxies = None
-		self.url = None
-		self.search_type = None
-		self.search_category = None
-		self.not_finished = True
-		self.keyword_queue = None
+		self.proxies = proxies
+		self.url = url
+		self.search_type = search_type
+		self.search_category = search_category
+		self.keyword_queue = keywords
+		self.results = results
+		self.lock = lock
 
 	def run(self):
-		k = self.keyword_queue.dequeue()
-		while self.not_finished:
-			if k.lock:
-				k.lock.acquire()
-				self.keyword = k
-				self.scrape()
-				k.lock.release()
+		while True:
+			with self.lock:
+				keyword = self.keyword_queue.get()
+			if keyword is None:
+				self.keyword_queue.put(keyword)
+				break
+			else:
+				self.keyword = keyword
+				self.__scrape()
 
-	def scrape(self):
+	def __scrape(self):
 		page = 1
 		job_entries = 0
 		not_last_page = True
@@ -108,30 +93,40 @@ class Worker(threading.Thread):
 
 					short_description = " ".join(short_description.split())
 					d = OrderedDict()
-					d['keyword'] = self.keyword.ID
+					d['keyword'] = self.keyword
 					d['job_title'] = job_title
 					d['location'] = location
 					d['company'] = company
 					d['short_description'] = short_description
-					self.__write_data(d)
+					self.results.put(json.dumps(d, indent=4))
 					job_entries += 1
 				page += 1
 			else:
 				not_last_page = False
-				self.not_finished = False
-		print "%d entries found for the keyword '%s'" % (job_entries, self.keyword.ID)
-
-	def __write_data(self, dictionary):
-		toWrite = json.dumps(dictionary, indent=4)
-		logging.warning(toWrite)
+		print "Worker %d - %d entries found for the keyword '%s'" % (self.ID, job_entries, self.keyword)
 
 	def __send_request(self, page):
 		self.url += str(self.search_type) + "/search/"
-		payload = {'q': self.keyword.ID, 'searchType': self.search_type, 'searchCategory': self.search_category, 'page': page}
-		return requests.get(self.url, params = payload)
+		payload = {'q': self.keyword, 'searchType': self.search_type, 'searchCategory': self.search_category, 'page': page}
+		return requests.get(self.url, params = payload, proxies = self.proxies)
 
+class Logger(threading.Thread):
+	def __init__(self, results):
+		threading.Thread.__init__(self)
+		self.results = results
 
-search = WebScraper()
-keywords = ["java", "php", "python", "ruby", "rails"]
-url = "http://mynimo.com/"
-search.search(keywords, url)
+	def run(self):
+		logging.basicConfig(filename="results.json", level=logging.WARNING, format='%(message)s')
+		started = False
+		while True:
+			if not self.results.empty():
+				to_write = self.results.get()
+				if to_write is None:
+					break
+				logging.warning(to_write)
+
+if __name__ == "__main__":
+	search = WebScraper()
+	keywords = ['python', 'php', 'perl', 'java', 'haskell', 'ada', 'fortran', 'cobol']
+	url = "http://mynimo.com/"
+	search.search(keywords, url)
