@@ -4,7 +4,6 @@ import requests
 import json
 import multiprocessing
 import logging
-import threading
 
 class WebScraper:
 	def __init__(self):
@@ -24,14 +23,14 @@ class WebScraper:
 			keyword.put(key)
 		keyword.put(None) #poison pill to end each worker
 
-		results = multiprocessing.Queue()
+		extracted_data = multiprocessing.Queue()
 		lock = multiprocessing.Lock()
 		workers = []
 		for i in range(multiprocessing.cpu_count()):
-			worker = Worker(url, i, search_category, search_type, keyword, self.proxies, results, lock)
+			worker = Worker(url, i, search_category, search_type, keyword, self.proxies, extracted_data, lock)
 			workers.append(worker)
 
-		logger = Logger(results)
+		logger = Logger(extracted_data)
 		logger.start()
 
 		for worker in workers:
@@ -40,10 +39,10 @@ class WebScraper:
 		for worker in workers:
 			worker.join()
 
-		results.put(None) #poison pill to end the writer
+		extracted_data.put(None) #poison pill to end the writer
 
 class Worker(multiprocessing.Process):
-	def __init__(self, url, id, search_category, search_type, keywords, proxies, results, lock):
+	def __init__(self, url, id, search_category, search_type, keywords, proxies, extracted_data, lock):
 		multiprocessing.Process.__init__(self)
 		self.ID = id
 		self.keyword = None
@@ -52,7 +51,7 @@ class Worker(multiprocessing.Process):
 		self.search_type = search_type
 		self.search_category = search_category
 		self.keyword_queue = keywords
-		self.results = results
+		self.extracted_data = extracted_data
 		self.lock = lock
 
 	def run(self):
@@ -98,7 +97,7 @@ class Worker(multiprocessing.Process):
 					d['location'] = location
 					d['company'] = company
 					d['short_description'] = short_description
-					self.results.put(json.dumps(d, indent=4))
+					self.extracted_data.put(d)
 					job_entries += 1
 				page += 1
 			else:
@@ -110,23 +109,24 @@ class Worker(multiprocessing.Process):
 		payload = {'q': self.keyword, 'searchType': self.search_type, 'searchCategory': self.search_category, 'page': page}
 		return requests.get(self.url, params = payload, proxies = self.proxies)
 
-class Logger(threading.Thread):
-	def __init__(self, results):
-		threading.Thread.__init__(self)
-		self.results = results
+class Logger(multiprocessing.Process):
+	def __init__(self, extracted_data):
+		multiprocessing.Process.__init__(self)
+		self.extracted_data = extracted_data
 
 	def run(self):
-		logging.basicConfig(filename="results.json", level=logging.WARNING, format='%(message)s')
+		logging.basicConfig(filename="extracted_data.json", level=logging.WARNING, format='%(message)s')
 		started = False
 		while True:
-			if not self.results.empty():
-				to_write = self.results.get()
+			if not self.extracted_data.empty():
+				to_write = self.extracted_data.get()
 				if to_write is None:
 					break
+				to_write = json.dumps(to_write, indent=4)
 				logging.warning(to_write)
 
 if __name__ == "__main__":
 	search = WebScraper()
-	keywords = ['python', 'php', 'perl', 'java', 'haskell', 'ada', 'fortran', 'cobol']
+	keywords = ['python', 'php', 'developer', 'java', 'ruby', 'rail']
 	url = "http://mynimo.com/"
 	search.search(keywords, url)
