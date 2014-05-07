@@ -4,6 +4,9 @@ import requests
 import json
 import multiprocessing
 import logging
+import time
+logging.basicConfig(filename="extracted_data.json", level=logging.WARNING, format='%(message)s')
+requests_log = logging.getLogger("requests")
 
 class WebScraper:
 	def __init__(self):
@@ -17,32 +20,30 @@ class WebScraper:
 		}
 
 	def search(self, keywords, url, search_type = "jobs", search_category = ""):
-		requests_log = logging.getLogger("requests")
 		keyword = multiprocessing.Queue()
 		for key in keywords:
 			keyword.put(key)
 		keyword.put(None) #poison pill to end each worker
-
 		extracted_data = multiprocessing.Queue()
-		lock = multiprocessing.Lock()
+		logger = Logger(extracted_data)
+
 		workers = []
 		for i in range(multiprocessing.cpu_count()):
-			worker = Worker(url, i, search_category, search_type, keyword, self.proxies, extracted_data, lock)
+			worker = Worker(url, i, search_category, search_type, keyword, self.proxies, logger)
 			workers.append(worker)
-
-		logger = Logger(extracted_data)
-		logger.start()
 
 		for worker in workers:
 			worker.start()
 
+		logger.start()
+
 		for worker in workers:
 			worker.join()
 
-		extracted_data.put(None) #poison pill to end the writer
+		logger.extracted_data.put(None) #poison pill to end the writer
 
 class Worker(multiprocessing.Process):
-	def __init__(self, url, id, search_category, search_type, keywords, proxies, extracted_data, lock):
+	def __init__(self, url, id, search_category, search_type, keywords, proxies, logger):
 		multiprocessing.Process.__init__(self)
 		self.ID = id
 		self.keyword = None
@@ -51,13 +52,11 @@ class Worker(multiprocessing.Process):
 		self.search_type = search_type
 		self.search_category = search_category
 		self.keyword_queue = keywords
-		self.extracted_data = extracted_data
-		self.lock = lock
+		self.logger = logger
 
 	def run(self):
 		while True:
-			with self.lock:
-				keyword = self.keyword_queue.get()
+			keyword = self.keyword_queue.get()
 			if keyword is None:
 				self.keyword_queue.put(keyword)
 				break
@@ -97,7 +96,7 @@ class Worker(multiprocessing.Process):
 					d['location'] = location
 					d['company'] = company
 					d['short_description'] = short_description
-					self.extracted_data.put(d)
+					self.logger.extracted_data.put(d)
 					job_entries += 1
 				page += 1
 			else:
@@ -115,8 +114,6 @@ class Logger(multiprocessing.Process):
 		self.extracted_data = extracted_data
 
 	def run(self):
-		logging.basicConfig(filename="extracted_data.json", level=logging.WARNING, format='%(message)s')
-		started = False
 		while True:
 			if not self.extracted_data.empty():
 				to_write = self.extracted_data.get()
@@ -124,6 +121,8 @@ class Logger(multiprocessing.Process):
 					break
 				to_write = json.dumps(to_write, indent=4)
 				logging.warning(to_write)
+			else:
+				time.sleep(2)
 
 if __name__ == "__main__":
 	search = WebScraper()
