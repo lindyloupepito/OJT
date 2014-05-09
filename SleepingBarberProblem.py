@@ -3,6 +3,13 @@ import time
 import random
 import logging
 
+customer_min_interval = 2
+customer_max_interval = 5
+min_service_time = 5
+max_service_time = 10
+min_waiting_time = 5
+max_waiting_time = 15
+
 class Queue:
 	def __init__(self):
 		self.lst = []
@@ -12,69 +19,74 @@ class Queue:
 
 	def dequeue(self):
 		to_return = None
-		if len(self.lst) > 0:
+		if not self.is_empty():
 			first = self.lst[0]
-			self.lst.remove(self.lst[0])
+			del self.lst[0]
 			to_return = first
 		else:
 			to_return = "Queue is empty."
 		return to_return
 
 	def is_empty(self):
-		return True if len(self.lst) <= 0 else False
+		return True if len(self.lst) == 0 else False
+
+class CustomerQueue(Queue):
+	def __init__(self):
+		Queue.__init__(self)
 
 	def remove(self, element):
 		self.lst.remove(element)
 
 class Customer(threading.Thread):
-	def __init__(self, name, barbershop):
+	def __init__(self, name):
 		threading.Thread.__init__(self)
 		self.name = name
+		self.service_time = random.randrange(min_service_time, max_service_time)
+		self.delay = random.randrange(customer_min_interval, customer_max_interval)
+		self.shop = None
 		self.is_last = False
-		self.shop = barbershop
 		self.served = False
-		self.printed = False
-		self.service_time = random.randrange(self.shop.min_service_time, self.shop.max_service_time)
-		if random.randrange(0, 100) < 50:
-			self.leave = True
-			self.waiting_time = random.randrange(self.shop.min_waiting_time, self.shop.max_waiting_time)
-			self.time_to_leave = 0
-		else:
-			self.leave = False
+		self.leave = False
 
 	def run(self):
-		self.__enter_shop()
-		while not self.served:
-			self.__wait()
-
-	def __enter_shop(self):
-		time.sleep(random.randrange(self.shop.customer_min_interval, self.shop.customer_max_interval))
+		time.sleep(self.delay)
 		logging.info("%s arrives at the barber shop." % self.name)
-		self.shop.customers_arrived += 1
-		if self.shop.customers_arrived == self.shop.num_of_customers:
-			self.is_last = True
-			self.leave = False #forces the last customer not to leave so that the loop 'start work' will end
-		if self.shop.counter == self.shop.num_of_seats:
-			logging.info("Waiting lounge is full. %s waits for a vacant seat." % self.name)
-		self.shop.seats.acquire()
-		self.shop.counter += 1
-		logging.info("%s acquires a seat." % self.name)
-		self.shop.waiting_customers.enqueue(self)
-		if self.leave:
-			self.time_to_leave = int(time.time() + self.waiting_time)
-
+		printed = False
+		while True:
+			vacant = self.shop.seats.acquire(False)
+			if vacant:
+				logging.info("%s acquires a seat." % self.name)
+				self.shop.waiting_customers.enqueue(self)
+				break
+			else:
+				if not printed:
+					logging.info("Waiting lounge is full. %s waits for a vacant seat." % self.name)
+					printed = True
+		self.__wait()
+		
 	def __wait(self):
-		if not self.printed:
-			logging.info("%s is waiting for his turn." % self.name)
-			self.printed = True
+		time_to_leave = 0
+		printed = False
+		if not self.is_last:
+			if random.randrange(0, 100) < 50:
+				self.leave = True
+				waiting_time = random.randrange(min_waiting_time, max_waiting_time)
+				time_to_leave = int(time.time() + waiting_time)
 
-		if self.leave:
-			if int(time.time()) == self.time_to_leave:
-				self.shop.waiting_customers.remove(self)
-				logging.info("%s cannot wait and leaves the shop." % self.name)
-				self.shop.seats.release()
-				self.shop.counter -= 1
-				self.served = True
+		while not self.served:
+			if not printed:
+				logging.info("%s is waiting for his turn." % self.name)
+				printed = True
+
+			if self.leave:
+				if int(time.time()) == time_to_leave:
+					try:
+						self.shop.waiting_customers.remove(self)
+						logging.info("%s cannot wait and leaves the shop." % self.name)
+						self.shop.seats.release()
+						self.served = True
+					except:
+						self.served = True
 
 class Barber(threading.Thread):
 	def __init__(self, barbershop):
@@ -94,7 +106,6 @@ class Barber(threading.Thread):
 				while not self.shop.waiting_customers.is_empty():
 					customer = self.shop.waiting_customers.dequeue()
 					self.shop.seats.release()
-					self.shop.counter -= 1
 					customer.served = True
 					self.__service_customer(customer)
 					if customer.is_last:
@@ -118,33 +129,26 @@ class Barber(threading.Thread):
 		logging.info("The barber wakes up O.O")
 
 class Barbershop:
-	def __init__(self):
+	def __init__(self, customers, num_of_seats):
 		logging.basicConfig(filename="barber.log", level=logging.INFO, format="%(message)s")
-
-		self.num_of_seats = 5
-		self.customer_min_interval = 5
-		self.customer_max_interval = 15
-		self.min_service_time = 3
-		self.max_service_time = 15
-		self.min_waiting_time = 10
-		self.max_waiting_time = 20
-		self.num_of_customers = 10
-
-		self.customers_arrived = 0
-		self.counter = 0
-		self.seats = threading.Semaphore(self.num_of_seats)
-		self.waiting_customers = Queue()
-
-		customers = []
-		for i in range(self.num_of_customers):
-			name = "Customer " + str(i+1)
-			customers.append(Customer(name, self))
+		self.seats = threading.Semaphore(num_of_seats)
+		self.waiting_customers = CustomerQueue()
 
 		print "Simulating..."
 		barber = Barber(self)
 		barber.start()
-
-		for customer in customers:
+		self.customers = customers
+		for customer in self.customers:
+			customer.shop = self
 			customer.start()
 
-bs = Barbershop()
+num_of_customers = 10
+num_of_seats = 5
+customers = []
+for i in range(num_of_customers):
+	name = "Customer " + str(i+1)
+	customers.append(Customer(name))
+
+customers[len(customers)-1].delay = ((min_service_time + max_service_time)/ 2) * num_of_customers
+customers[len(customers)-1].is_last = True
+bs = Barbershop(customers, num_of_seats)
